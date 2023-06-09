@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.metrics.pairwise import pairwise_kernels
 
 import torch
 import torch.nn as nn
@@ -106,6 +107,35 @@ def permutation_test_encoder_mmd(x_batch, y_batch, r_batch, encoder, n_perms, si
         xy_batch = xy_batch[shuffled_idx]
         simulated_mmds.append(encoder_mmd(xy_batch[:nx], xy_batch[nx:], r_batch, encoder_r_batch, encoder, sigma_squared=sigma_squared))
     return observed_mmd, simulated_mmds
+
+### GAUSSIAN KERNEL ###
+
+def gaussian_mmd(X, Y, sigma_squared=1):
+    # sklearn for some reason uses bandwidth*|x-y| instead of |x-y|/bandwidth
+    kxx, kxy, kyy = 0, 0, 0
+    kxx = pairwise_kernels(X, X, metric='rbf', gamma=1/sigma_squared).sum() / (len(X) ** 2)
+    kxy = pairwise_kernels(X, Y, metric='rbf', gamma=1/sigma_squared).sum() / (len(X) * len(Y))
+    kyy = pairwise_kernels(Y, Y, metric='rbf', gamma=1/sigma_squared).sum() / (len(Y) ** 2)
+    return kxx - (2 * kxy) + kyy 
+
+def permutation_test_gaussian_mmd(X, Y, n_perms=100, sigma_squared=1):
+    obs_mmd = gaussian_mmd(
+        X.flatten(start_dim=1), 
+        Y.flatten(start_dim=1), 
+        sigma_squared=sigma_squared
+    )
+    XY_batch = torch.cat([X, Y], dim=0)
+    sim_mmds = []
+    for _ in tqdm.trange(n_perms):
+        shuffled_idx = torch.randperm(len(X) + len(Y))
+        shuffled_XY_batch = XY_batch[shuffled_idx]
+        shuffled_X, shuffled_Y = shuffled_XY_batch[:len(X)], shuffled_XY_batch[len(X):]
+        sim_mmds.append(gaussian_mmd(
+            shuffled_X.flatten(start_dim=1), 
+            shuffled_Y.flatten(start_dim=1), 
+            sigma_squared=sigma_squared)
+        )
+    return obs_mmd, sim_mmds
 
 ### ISOTROPIC KERNEL ###
 
